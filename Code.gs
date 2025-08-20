@@ -73,7 +73,7 @@ function getRandomBaiHoc() {
 }
 
 /**
- * Lấy tất cả to do từ sheet 'to do' (cột B)
+ * Lấy tất cả to do của ngày hiện tại từ sheet 'to do'
  */
 function getRandomToDo() {
   const spreadsheet = SpreadsheetApp.openByUrl(getSpreadsheetUrl());
@@ -88,25 +88,43 @@ function getRandomToDo() {
     return [];
   }
   
-  // Lấy tất cả dữ liệu từ cột B (bỏ qua hàng tiêu đề)
-  const range = sheet.getRange(2, 2, lastRow - 1, 1);
-  const values = range.getValues().flat().filter(value => {
-    // Lọc bỏ các giá trị rỗng và các giá trị là Date object
-    if (!value || value.toString().trim() === '') {
-      return false;
+  // Lấy ngày hiện tại (chỉ ngày, không có giờ)
+  const today = new Date();
+  const todayString = today.toLocaleDateString('vi-VN');
+  
+  // Lấy tất cả dữ liệu từ cột A (ngày) và cột B (việc cần làm)
+  const range = sheet.getRange(2, 1, lastRow - 1, 2);
+  const values = range.getValues();
+  
+  // Lọc các hàng có ngày trùng với ngày hiện tại
+  const todayTodos = [];
+  
+  values.forEach(row => {
+    const dateCell = row[0];
+    const todoCell = row[1];
+    
+    // Kiểm tra nếu có dữ liệu việc cần làm
+    if (todoCell && todoCell.toString().trim() !== '') {
+      let dateString = '';
+      
+      // Xử lý ngày từ cột A
+      if (dateCell instanceof Date) {
+        dateString = dateCell.toLocaleDateString('vi-VN');
+      } else if (dateCell && dateCell.toString().trim() !== '') {
+        dateString = dateCell.toString().trim();
+      }
+      
+      // So sánh ngày
+      if (dateString === todayString) {
+        todayTodos.push(todoCell.toString().trim());
+      }
     }
-    // Loại bỏ Date objects
-    if (value instanceof Date) {
-      return false;
-    }
-    // Chấp nhận tất cả các kiểu dữ liệu khác (string, number, etc.)
-    return true;
   });
   
-  console.log('To Do values found:', values); // Debug log
+  console.log('Today date:', todayString);
+  console.log('Today To Do values found:', todayTodos);
   
-  // Trả về tất cả các giá trị
-  return values;
+  return todayTodos;
 }
 
 /**
@@ -196,10 +214,6 @@ function createEmailContent(baiHocData, toDoData, ghiLaiData) {
         .content-item {
           margin-bottom: 12px;
           padding: 10px 0;
-          border-bottom: 1px solid #eee;
-        }
-        .content-item:last-child {
-          border-bottom: none;
         }
         .ghi-lai-item {
           margin-bottom: 8px;
@@ -230,18 +244,20 @@ function createEmailContent(baiHocData, toDoData, ghiLaiData) {
   }
   
   // Thêm to do
+  html += `
+    <div class="section">
+      <div class="section-title">Việc cần làm</div>
+  `;
+  
   if (toDoData && toDoData.length > 0) {
-    html += `
-      <div class="section">
-        <div class="section-title">Việc cần làm</div>
-    `;
-    
     toDoData.forEach((toDo, index) => {
       html += `<div class="content-item">${index + 1}. ${toDo}</div>`;
     });
-    
-    html += `</div>`;
+  } else {
+    html += `<div class="content-item">-</div>`;
   }
+  
+  html += `</div>`;
   
   // Thêm ghi lại cuộc sống
   if (ghiLaiData) {
