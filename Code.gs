@@ -9,10 +9,14 @@ const CONFIG = {
   SHEETS: {
     BAI_HOC: 'bai hoc moi ngay',
     TO_DO: 'to do',
-    GHI_LAI: 'ghi lai cuoc song'
+    ENGLISH: 'english'
   },
   EMAIL_RECIPIENT: 'quoc.nguyen3@hoanmy.com', // Thay đổi email của bạn
-  EMAIL_SUBJECT: 'Bài học và suy ngẫm hàng ngày'
+  EMAIL_SUBJECT: 'Bài học và suy ngẫm hàng ngày',
+  COUNTS: {
+    BAI_HOC: 5,
+    ENGLISH: 20
+  }
 };
 
 /**
@@ -34,10 +38,11 @@ function sendDailyEmail() {
     // Lấy dữ liệu từ các sheets
     const baiHocData = getRandomBaiHoc();
     const toDoData = getRandomToDo();
-    const ghiLaiData = getRandomGhiLai();
+    const englishData = getRandomEnglish();
+    const totalCompleted = getTotalCompletedTodos();
     
     // Tạo nội dung email
-    const emailContent = createEmailContent(baiHocData, toDoData, ghiLaiData);
+    const emailContent = createEmailContent(baiHocData, toDoData, englishData, totalCompleted);
     
     // Gửi email với tiêu đề mới
     sendEmail(emailContent, emailSession);
@@ -49,7 +54,8 @@ function sendDailyEmail() {
 }
 
 /**
- * Lấy 3 bài học ngẫu nhiên từ sheet 'bai hoc moi ngay' (cột B)
+ * Lấy 5 bài học ngẫu nhiên từ sheet 'bai hoc moi ngay' (cột B)
+ * và đánh dấu 'x' vào cột 'mail' cho các bài học đã gửi
  */
 function getRandomBaiHoc() {
   const spreadsheet = SpreadsheetApp.openByUrl(getSpreadsheetUrl());
@@ -64,12 +70,71 @@ function getRandomBaiHoc() {
     return [];
   }
   
-  // Lấy tất cả dữ liệu từ cột B (bỏ qua hàng tiêu đề)
-  const range = sheet.getRange(2, 2, lastRow - 1, 1);
-  const values = range.getValues().flat().filter(value => value && value.toString().trim() !== '');
+  // Tìm cột 'mail' dựa trên tiêu đề
+  const headerRange = sheet.getRange(1, 1, 1, sheet.getLastColumn());
+  const headers = headerRange.getValues()[0];
+  const mailColumnIndex = headers.findIndex(header => 
+    header && header.toString().toLowerCase().trim() === 'mail'
+  ) + 1;
   
-  // Lấy 3 giá trị ngẫu nhiên
-  return getRandomItems(values, 3);
+  if (mailColumnIndex === 0) {
+    throw new Error('Không tìm thấy cột "mail" trong sheet bài học');
+  }
+  
+  // Lấy tất cả dữ liệu từ cột B (bài học) và cột mail
+  const dataRange = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn());
+  const values = dataRange.getValues();
+  
+  // Lọc các hàng chưa được đánh dấu 'x' trong cột mail và có dữ liệu bài học
+  const availableRows = [];
+  values.forEach((row, index) => {
+    const baiHoc = row[1]; // Cột B - bài học
+    const mailStatus = row[mailColumnIndex - 1]; // Cột mail
+    
+    if (baiHoc && baiHoc.toString().trim() !== '' && 
+        mailStatus !== 'x') {
+      availableRows.push({
+        rowIndex: index + 2, // +2 vì index bắt đầu từ 0 và hàng đầu tiên là tiêu đề
+        baiHoc: baiHoc.toString().trim()
+      });
+    }
+  });
+  
+  // Nếu không còn bài học nào chưa gửi, reset tất cả (xóa 'x' khỏi cột mail)
+  if (availableRows.length === 0) {
+    console.log('Tất cả bài học đã được gửi, đang reset...');
+    const mailColumn = sheet.getRange(2, mailColumnIndex, lastRow - 1, 1);
+    mailColumn.clearContent();
+    
+    // Lặp lại để lấy dữ liệu sau khi reset
+    values.forEach((row, index) => {
+      const baiHoc = row[1];
+      
+      if (baiHoc && baiHoc.toString().trim() !== '') {
+        availableRows.push({
+          rowIndex: index + 2,
+          baiHoc: baiHoc.toString().trim()
+        });
+      }
+    });
+  }
+  
+  if (availableRows.length === 0) {
+    return [];
+  }
+  
+  // Lấy ngẫu nhiên số bài học theo cấu hình
+  const shuffled = availableRows.slice().sort(() => 0.5 - Math.random());
+  const selectedLessons = shuffled.slice(0, Math.min(CONFIG.COUNTS.BAI_HOC, availableRows.length));
+  
+  // Đánh dấu 'x' vào cột mail cho các bài học đã chọn
+  selectedLessons.forEach(lesson => {
+    sheet.getRange(lesson.rowIndex, mailColumnIndex).setValue('x');
+  });
+  
+  console.log(`Đã chọn ${selectedLessons.length} bài học và đánh dấu 'x'`);
+  
+  return selectedLessons.map(lesson => lesson.baiHoc);
 }
 
 /**
@@ -128,43 +193,112 @@ function getRandomToDo() {
 }
 
 /**
- * Lấy 1 hàng ngẫu nhiên từ sheet 'ghi lai cuoc song' (cột B, C, D)
+ * Đếm tổng số việc đã làm trong sheet 'to do' (tất cả các hàng có dữ liệu)
  */
-function getRandomGhiLai() {
+function getTotalCompletedTodos() {
   const spreadsheet = SpreadsheetApp.openByUrl(getSpreadsheetUrl());
-  const sheet = spreadsheet.getSheetByName(CONFIG.SHEETS.GHI_LAI);
+  const sheet = spreadsheet.getSheetByName(CONFIG.SHEETS.TO_DO);
   
   if (!sheet) {
-    throw new Error(`Không tìm thấy sheet: ${CONFIG.SHEETS.GHI_LAI}`);
+    return 0;
   }
   
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) {
-    return null;
+    return 0;
   }
   
-  // Lấy tất cả dữ liệu từ cột B, C, D (bỏ qua hàng tiêu đề)
-  const range = sheet.getRange(2, 2, lastRow - 1, 3);
+  // Lấy tất cả dữ liệu từ cột A (việc cần làm)
+  const range = sheet.getRange(2, 1, lastRow - 1, 1);
+  const values = range.getValues().flat();
+  
+  // Đếm số hàng có dữ liệu
+  const completedCount = values.filter(value => value && value.toString().trim() !== '').length;
+  
+  console.log(`Tổng số việc đã làm: ${completedCount}`);
+  
+  return completedCount;
+}
+
+/**
+ * Lấy 20 từ vựng tiếng Anh ngẫu nhiên từ sheet 'english' (cột A, B, D)
+ * và đánh dấu 'x' vào cột F (mail) cho các từ đã gửi
+ */
+function getRandomEnglish() {
+  const spreadsheet = SpreadsheetApp.openByUrl(getSpreadsheetUrl());
+  const sheet = spreadsheet.getSheetByName(CONFIG.SHEETS.ENGLISH);
+  
+  if (!sheet) {
+    throw new Error(`Không tìm thấy sheet: ${CONFIG.SHEETS.ENGLISH}`);
+  }
+  
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    return [];
+  }
+  
+  // Lấy tất cả dữ liệu từ cột A, B, C, D, E, F
+  const range = sheet.getRange(2, 1, lastRow - 1, 6);
   const values = range.getValues();
   
-  // Lọc các hàng có dữ liệu
-  const validRows = values.filter(row => 
-    row.some(cell => cell && cell.toString().trim() !== '')
-  );
+  // Lọc các hàng chưa được đánh dấu 'x' trong cột F (mail) và có dữ liệu hợp lệ
+  const availableRows = [];
+  values.forEach((row, index) => {
+    const tuVung = row[0]; // Cột A - từ vựng
+    const chuThich = row[1]; // Cột B - chú thích  
+    const phienAm = row[3]; // Cột D - phiên âm
+    const mailStatus = row[5]; // Cột F - mail
+    
+    if (tuVung && tuVung.toString().trim() !== '' && 
+        mailStatus !== 'x') {
+      availableRows.push({
+        rowIndex: index + 2, // +2 vì index bắt đầu từ 0 và hàng đầu tiên là tiêu đề
+        tuVung: tuVung.toString().trim(),
+        chuThich: chuThich ? chuThich.toString().trim() : '',
+        phienAm: phienAm ? phienAm.toString().trim() : ''
+      });
+    }
+  });
   
-  if (validRows.length === 0) {
-    return null;
+  // Nếu không còn từ nào chưa gửi, reset tất cả (xóa 'x' khỏi cột F)
+  if (availableRows.length === 0) {
+    console.log('Tất cả từ vựng đã được gửi, đang reset...');
+    const mailColumn = sheet.getRange(2, 6, lastRow - 1, 1);
+    mailColumn.clearContent();
+    
+    // Lặp lại để lấy dữ liệu sau khi reset
+    values.forEach((row, index) => {
+      const tuVung = row[0];
+      const chuThich = row[1];
+      const phienAm = row[3];
+      
+      if (tuVung && tuVung.toString().trim() !== '') {
+        availableRows.push({
+          rowIndex: index + 2,
+          tuVung: tuVung.toString().trim(),
+          chuThich: chuThich ? chuThich.toString().trim() : '',
+          phienAm: phienAm ? phienAm.toString().trim() : ''
+        });
+      }
+    });
   }
   
-  // Lấy 1 hàng ngẫu nhiên
-  const randomIndex = Math.floor(Math.random() * validRows.length);
-  const selectedRow = validRows[randomIndex];
+  if (availableRows.length === 0) {
+    return [];
+  }
   
-  return {
-    nhinThay: selectedRow[0] || '',
-    nhanRa: selectedRow[1] || '',
-    baiHoc: selectedRow[2] || ''
-  };
+  // Lấy ngẫu nhiên số từ vựng theo cấu hình
+  const shuffled = availableRows.slice().sort(() => 0.5 - Math.random());
+  const selectedWords = shuffled.slice(0, Math.min(CONFIG.COUNTS.ENGLISH, availableRows.length));
+  
+  // Đánh dấu 'x' vào cột F cho các từ đã chọn
+  selectedWords.forEach(word => {
+    sheet.getRange(word.rowIndex, 6).setValue('x');
+  });
+  
+  console.log(`Đã chọn ${selectedWords.length} từ vựng và đánh dấu 'x'`);
+  
+  return selectedWords;
 }
 
 /**
@@ -182,7 +316,7 @@ function getRandomItems(array, count) {
 /**
  * Tạo nội dung email HTML
  */
-function createEmailContent(baiHocData, toDoData, ghiLaiData) {
+function createEmailContent(baiHocData, toDoData, englishData, totalCompleted = 0) {
   let html = `
     <!DOCTYPE html>
     <html>
@@ -246,7 +380,7 @@ function createEmailContent(baiHocData, toDoData, ghiLaiData) {
   // Thêm to do
   html += `
     <div class="section">
-      <div class="section-title">Việc cần làm</div>
+      <div class="section-title">Đã làm</div>
   `;
   
   if (toDoData && toDoData.length > 0) {
@@ -257,26 +391,37 @@ function createEmailContent(baiHocData, toDoData, ghiLaiData) {
     html += `<div class="content-item">-</div>`;
   }
   
-  html += `</div>`;
-  
-  // Thêm ghi lại cuộc sống
-  if (ghiLaiData) {
+  // Thêm dấu chấm động lực
+  if (totalCompleted > 0) {
+    const dots = '.'.repeat(totalCompleted);
     html += `
-      <div class="section">
-        <div class="section-title">Ghi lại cuộc sống</div>
-        <div class="content-item">
-          <div class="ghi-lai-item">
-            <span class="ghi-lai-label">Nhìn thấy:</span> ${ghiLaiData.nhinThay}
-          </div>
-          <div class="ghi-lai-item">
-            <span class="ghi-lai-label">Nhận ra:</span> ${ghiLaiData.nhanRa}
-          </div>
-          <div class="ghi-lai-item">
-            <span class="ghi-lai-label">Bài học:</span> ${ghiLaiData.baiHoc}
-          </div>
-        </div>
+      <div class="content-item" style="margin-top: 20px; padding: 15px; background-color: #f9f9f9; border-radius: 5px;">
+        <div style="font-weight: 600; margin-bottom: 10px; color: #333;">Tổng công việc hoàn thành (${totalCompleted}):</div>
+        <div style="font-family: monospace; font-size: 16px; line-height: 1.4; word-break: break-all; color: #666;">${dots}</div>
       </div>
     `;
+  }
+  
+  html += `</div>`; 
+  
+  // Thêm từ vựng tiếng Anh
+  if (englishData && englishData.length > 0) {
+    html += `
+      <div class="section">
+        <div class="section-title">English Vocabulary</div>
+    `;
+    
+    englishData.forEach((word, index) => {
+      html += `
+        <div class="content-item">
+          <div style="font-weight: 600; margin-bottom: 5px;">${index + 1}. ${word.tuVung}</div>
+          <div style="font-style: italic; color: #666; margin-bottom: 3px;">${word.phienAm}</div>
+          <div style="color: #333;">${word.chuThich}</div>
+        </div>
+      `;
+    });
+    
+    html += `</div>`;
   }
   
   html += `
@@ -293,7 +438,7 @@ function createEmailContent(baiHocData, toDoData, ghiLaiData) {
 function sendEmail(htmlContent, emailSession = 1) {
   const currentDate = new Date();
   const dateString = currentDate.toLocaleDateString('vi-VN');
-  const subject = `TO DO ${dateString} [${emailSession}]`;
+  const subject = `${dateString} [${emailSession}]`;
   
   MailApp.sendEmail({
     to: CONFIG.EMAIL_RECIPIENT,
@@ -355,10 +500,13 @@ function testScript() {
     const toDo = getRandomToDo();
     console.log('To do:', toDo);
     
-    const ghiLai = getRandomGhiLai();
-    console.log('Ghi lại:', ghiLai);
+    const english = getRandomEnglish();
+    console.log('English vocabulary:', english);
     
-    const emailContent = createEmailContent(baiHoc, toDo, ghiLai);
+    const totalCompleted = getTotalCompletedTodos();
+    console.log('Tổng việc đã làm:', totalCompleted);
+    
+    const emailContent = createEmailContent(baiHoc, toDo, english, totalCompleted);
     console.log('Email content created successfully');
     
   } catch (error) {
