@@ -396,7 +396,7 @@ function createEmailContent(baiHocData, toDoData, englishData, totalCompleted = 
     const dots = '.'.repeat(totalCompleted);
     html += `
       <div class="content-item" style="margin-top: 20px; padding: 15px; background-color: #f9f9f9; border-radius: 5px;">
-        <div style="font-weight: 600; margin-bottom: 10px; color: #333;">Tổng công việc hoàn thành (${totalCompleted}):</div>
+        <div style="font-weight: 600; margin-bottom: 10px; color: #333;">Done [${totalCompleted}]:</div>
         <div style="font-family: monospace; font-size: 16px; line-height: 1.4; word-break: break-all; color: #666;">${dots}</div>
       </div>
     `;
